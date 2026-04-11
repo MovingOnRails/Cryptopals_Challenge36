@@ -345,7 +345,10 @@ int main(){
     // 2. Generate actual HMAC
     unsigned char hmac_result[SHA256_DIGEST_LENGTH];
     unsigned int hmac_len;
-    HMAC(EVP_sha256(), K, SHA256_DIGEST_LENGTH, salt_hex, 32, hmac_result, &hmac_len);
+    unsigned char* salt_bytes = malloc(16);
+    int salt_bytes_length = 0;
+    salt_bytes = hexStringToRawString(salt_hex,salt_bytes,&salt_bytes_length);
+    HMAC(EVP_sha256(), K, SHA256_DIGEST_LENGTH, salt_bytes, 16, hmac_result, &hmac_len);
     // 3. Convert hmac_result to Hex for the JSON body
     char hmac_hex[65];
     for(int i = 0; i < 32; i++) {
