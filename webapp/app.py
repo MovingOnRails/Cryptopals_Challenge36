@@ -83,10 +83,13 @@ def authenticate_last_step():
 
 
     S_hex = hex(S)[2:]
-    K_hex = hashlib.sha256(S_hex).hexdigest()
+    S_bytes = bytes.fromhex(S_hex)
+    print(f"S: {S_hex}")
+    K_hex = hashlib.sha256(S_bytes).hexdigest()
     K_bytes = bytes.fromhex(K_hex)
 
     generated_HMAC = hmac.new(K_bytes, bytes.fromhex(salt_hex), hashlib.sha256).hexdigest()
+    print(f"generated_HMAC: ")
     if client_HMAC == generated_HMAC:
         return "Authentication OK", 200
     else:

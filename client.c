@@ -4,6 +4,7 @@
 #include <gmp.h>
 #include <cjson/cJSON.h>
 #include <openssl/sha.h>
+#include <openssl/hmac.h>
 
 
 #include "../../set1/Challenge2/xorHelper.c"
@@ -99,6 +100,35 @@ unsigned char* get_xH_hex(){
     return xH_hex;
 }
 
+void compute_u(mpz_t u, mpz_t A, mpz_t B, mpz_t N) {
+    // Determine the size of N in bytes (this is the standard padding size)
+    size_t n_bytes = (mpz_sizeinbase(N, 2) + 7) / 8;
+
+    unsigned char *buffer_A = malloc(n_bytes);
+    unsigned char *buffer_B = malloc(n_bytes);
+    
+    size_t count_A, count_B;
+
+    // mpz_export(buffer, &written, order, size, endian, nails, op)
+    // order=1 (Big Endian), size=1 (byte-wise), endian=1 (Big Endian)
+    mpz_export(buffer_A, &count_A, 1, 1, 1, 0, A);
+
+    // Note: we offset the pointer by n_bytes to leave space for A
+    mpz_export(buffer_B, &count_B, 1, 1, 1, 0, B);
+
+    unsigned char* combined = malloc(count_A+count_B);
+    memcpy(combined, buffer_A, count_A);
+    memcpy(combined+count_A, buffer_B, count_B);
+    // Generate SHA256 hash
+    unsigned char uH_bytes[SHA256_DIGEST_LENGTH];
+    SHA256(combined, count_A+count_B, uH_bytes);
+
+    // Load the hash bytes back into the GMP variable 'u'
+    mpz_import(u, SHA256_DIGEST_LENGTH, 1, 1, 1, 0, uH_bytes);
+
+    free(combined);
+}
+
 int main(){
     
 
@@ -177,7 +207,7 @@ int main(){
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "v", v_hex);
-    char* json_body = cJSON_Print(root);
+    char* json_body = cJSON_PrintUnformatted(root);
     curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, json_body);
 
     struct curl_slist *headers = NULL;
@@ -235,7 +265,7 @@ int main(){
     cJSON *root2 = cJSON_CreateObject();
     cJSON_AddStringToObject(root2,"I","alice@alicemail.com");
     cJSON_AddStringToObject(root2,"A",A_hex_local);
-    char* json_body2 = cJSON_Print(root2);
+    char* json_body2 = cJSON_PrintUnformatted(root2);
 
     curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, json_body2);
 
@@ -254,7 +284,6 @@ int main(){
     if(res == CURLE_OK){
         curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE,&response_code);
         if(response_code == 200){
-            // TODO PROCESS response_body, get B (using authfirststep_chunk)
             extract_B(authfirststep_chunk.memory);
             printf("B_hex: %s\n",B_hex);
             printf("auth_first_step() successful\n");
@@ -272,16 +301,97 @@ int main(){
 
     freefunc(A_hex, strlen(A_hex) + 1);
 
+    // ----------------Compute x, xH, u, uH, S and K----------------
+
+    // I should compute again x and xH BUT I'm not doing it, I'll use the already computed
+    // uH = SHA256(A|B)
+    mpz_t u, B;
+    mpz_inits(u, B, NULL);
+
+    mpz_set_str(B, B_hex, 16);
+    compute_u(u, A, B, N);
+
+    // ----------------Compute HMAC_SHA256(K, salt)----------------
+    // S =  (B - k * g**x)**(a + u * x) % N
+    // S =  (B - k * v)**(a + u * x) % N
+    mpz_t S, base, exponent;
+    mpz_inits(S, base, exponent, NULL);
+
+    // base = B - kv
+    mpz_mul(base, k, v);
+    mpz_sub(base,B,base);
+    mpz_mod(base, base, N);
+
+    // exponent = a+ux
+    mpz_mul(exponent, u, x);
+    mpz_add(exponent, a, exponent);
+
+    mpz_powm(S, base, exponent, N);
+    //TODO 
 
 
-
+    size_t n_bytes = (mpz_sizeinbase(N, 2) + 7) / 8;
     
+    unsigned char *buffer_S = malloc(n_bytes);
+    size_t count_S;
+    mpz_export(buffer_S, &count_S, 1, 1, 1, 0, S);
+    unsigned char K[SHA256_DIGEST_LENGTH];
+    SHA256(buffer_S,count_S,K);
+    printf("S: ");
+    for(int i=0;i<count_S;i++){
+        printf("%02x", buffer_S[i]);
+    }
+    printf("\n");
+    // 2. Generate actual HMAC
+    unsigned char hmac_result[SHA256_DIGEST_LENGTH];
+    unsigned int hmac_len;
+    HMAC(EVP_sha256(), K, SHA256_DIGEST_LENGTH, salt_hex, 32, hmac_result, &hmac_len);
+    // 3. Convert hmac_result to Hex for the JSON body
+    char hmac_hex[65];
+    for(int i = 0; i < 32; i++) {
+        sprintf(hmac_hex + (i * 2), "%02x", hmac_result[i]);
+    }
+    printf("\n");
 
-    // Compute x, xH, u, uH, S and K
+    // Generate HMAC
 
-    // Compute HMAC_SHA256(K, salt)
-
-    // Send HMAC to Server
+    // ----------------Send HMAC to Server----------------
     // Server returns 200 if okay else 401
+
+    curl_easy_reset(curl_handle);
+
+    cJSON *root3 = cJSON_CreateObject();
+    cJSON_AddStringToObject(root3,"HMAC",hmac_hex);
+    char* json_body3 = cJSON_PrintUnformatted(root3);
+    
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, json_body3);
+
+    struct curl_slist *headers3 = NULL;
+    headers3 = curl_slist_append(headers3, "Content-Type: application/json");
+    headers3 = curl_slist_append(headers3, "Accept: application/json");
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers3);
+
+    curl_easy_setopt(curl_handle, CURLOPT_URL, "localhost:5000/auth_last_step");
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, silence_callback);
+
+    curl_easy_perform(curl_handle);
+    if(res == CURLE_OK){
+        curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE,&response_code);
+        if(response_code == 200){
+            printf("auth_last_step() successful\n");
+        } else {
+            printf("auth_last_step() unsuccessful\n");
+            return 1;
+        }
+    } else {
+        printf("auth_last_step() curl request failed\n");
+        return 1;
+    }
+    curl_slist_free_all(headers3);
+    free(json_body3);
+    cJSON_Delete(root3);
+
+    free(A_hex);
+    free(B_hex);
     return 0;
 }
