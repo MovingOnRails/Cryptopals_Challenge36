@@ -26,13 +26,13 @@ def startup():
     salt_hex = secrets.token_hex(16)
     b = 0
     while b == 0:
-        b = secrets.randBelow(N)
+        b = secrets.randbelow(N)
 
     print(f'N: {N}\n')
-    print(f'salt_bytes: {salt_hex}\n')
 
 @app.route('/get_salt', methods=['GET'])
 def get_salt():
+    print(f"salt_hex: {salt_hex}\n")
     return jsonify({"salt": salt_hex}), 201
 
 @app.route('/register', methods=['POST'])

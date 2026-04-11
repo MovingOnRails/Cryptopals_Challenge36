@@ -9,7 +9,10 @@
                 "-g",
                 "${file}",
                 "-o",
-                "${fileDirname}/${fileBasenameNoExtension}"
+                "${fileDirname}/${fileBasenameNoExtension}",
+                "-lgmp",
+                "-lcjson",
+                "-lcurl"
             ],
             "options": {
                 "cwd": "${fileDirname}"
