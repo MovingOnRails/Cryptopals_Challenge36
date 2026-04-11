@@ -299,8 +299,6 @@ int main(){
     free(json_body2);
     cJSON_Delete(root2);
 
-    freefunc(A_hex, strlen(A_hex) + 1);
-
     // ----------------Compute x, xH, u, uH, S and K----------------
 
     // I should compute again x and xH BUT I'm not doing it, I'll use the already computed
