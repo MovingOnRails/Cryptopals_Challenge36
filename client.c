@@ -3,11 +3,14 @@
 #include <curl/curl.h>
 #include <gmp.h>
 #include <cjson/cJSON.h>
+#include <openssl/sha.h>
 
 
 #include "../../set1/Challenge2/xorHelper.c"
 
-unsigned char salt_hex[32];
+unsigned char salt_hex[33];
+unsigned char password[17] = "YELLOW SUBMARINE";
+int password_length = 16;
 
 // Struct to store libcurl response
 struct MemoryBlock {
@@ -52,12 +55,37 @@ void extract_salt(char *json_string) {
 }
 
 int main(){
+    
+
+    // --------------------STARTUP--------------------
+    mpz_t g, k, N, a, v;
+    mpz_inits(g, k, N, a, v, NULL);
+    gmp_randstate_t state;
+
+    mpz_set_ui(g, 2);
+    mpz_set_ui(k, 3);
+    const char* nist_p = "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca237327ffffffffffffffff";
+
+    mpz_set_str(N, nist_p, 16);
+    gmp_printf("N: %Zd\n", N);
+    gmp_printf("g: %Zd\n", g);
+    gmp_printf("k: %Zd\n", k);
+
+    gmp_randinit_default(state);
+    gmp_randseed_ui(state, 12345);
+
+    mpz_set_ui(a, 0);
+    while(mpz_cmp_ui(a, 0) == 0){
+        mpz_urandomm(a,state,N);
+    }
+
+
     // ------------------Client get_salt()------------------
     // send I
     // Server returns SALT
     CURL* curl_handle;
     CURLcode res;
-    struct MemoryBlock getsalt_chunk = {malloc(1), 0};
+    struct MemoryBlock getsalt_chunk = {malloc(32), 0};
 
     curl_handle = curl_easy_init();
 
@@ -88,9 +116,31 @@ int main(){
     // ------------------Client register()------------------
     // send I, v
     // Server returns OK
+    
+
+    unsigned char* salt_bytes = malloc(32);
+    int salt_bytes_length = 0;
+    salt_bytes = hexStringToRawString(salt_hex, salt_bytes, &salt_bytes_length);
+
+    unsigned char* salt_and_password_to_hash = malloc(salt_bytes_length+password_length);
+    memcpy(salt_and_password_to_hash, salt_bytes, salt_bytes_length);
+    memcpy(salt_and_password_to_hash+salt_bytes_length,password,password_length);
+    unsigned char xH_bytes[32];
+    SHA256(salt_and_password_to_hash,salt_bytes_length+password_length,xH_bytes);
+    unsigned char xH_hex[65];
+    for(int i=0;i<64;i++){
+        sprintf(xH_hex + (i * 2), "%02x", xH_bytes);
+    }
+    mpz_t x;
+    mpz_inits(x, NULL);
+    mpz_set_str(x, xH_hex, 16);
+
+    mpz_powm(v, g, x, N);
+    char* v_hex = mpz_get_str(NULL, 16, v);
+    printf("v_hex: %s\n", v_hex);
+    
     curl_easy_reset(curl_handle);
 
-    unsigned char v_hex[5] = "ffff";
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "v", v_hex);
     char* json_body = cJSON_Print(root);

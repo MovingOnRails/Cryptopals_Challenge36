@@ -30,6 +30,9 @@ def startup():
         b = secrets.randbelow(N)
 
     print(f'N: {N}')
+    print(f'g: {g}')
+    print(f'k: {k}')
+    print(f"salt_hex: {salt_hex}")
 
 @app.route('/get_salt', methods=['GET'])
 def get_salt():

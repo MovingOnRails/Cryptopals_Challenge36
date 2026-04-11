@@ -12,7 +12,8 @@
                 "${fileDirname}/${fileBasenameNoExtension}",
                 "-lgmp",
                 "-lcjson",
-                "-lcurl"
+                "-lcurl",
+                "-lcrypto"
             ],
             "options": {
                 "cwd": "${fileDirname}"
