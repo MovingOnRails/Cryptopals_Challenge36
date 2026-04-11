@@ -61,10 +61,11 @@ def authenticate_first_step():
     A_hex = data.get('A')
     print(f"A_hex: {A_hex}")
 
-    term1 = (k*v_hex) % N
+    term1 = (k*v_int) % N
     term2 = pow(g, b, N)
     B_int = (term1 + term2) % N
     B_hex = hex(B_int)[2:]
+    print(f"B_hex: {B_hex}")
 
     return jsonify({"B": B_hex}), 200
 
@@ -77,7 +78,7 @@ def authenticate_last_step():
     uH_hex = uH_bytes.hexdigest()
     u = int(uH_hex, 16)
     
-    term1 = A_int * pow(v_hex, u, N) % N
+    term1 = A_int * pow(v_int, u, N) % N
     S = pow(term1, b, N)
 
 

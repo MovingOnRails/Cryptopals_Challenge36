@@ -11,6 +11,10 @@
 unsigned char salt_hex[33];
 unsigned char password[17] = "YELLOW SUBMARINE";
 int password_length = 16;
+unsigned char* B_hex;
+int B_hex_length = 0;
+unsigned char* A_hex;
+int A_hex_length = 0;
 
 // Struct to store libcurl response
 struct MemoryBlock {
@@ -52,6 +56,47 @@ void extract_salt(char *json_string) {
         memcpy(salt_hex, salt_item->valuestring, 32);
     }
     cJSON_Delete(root);
+}
+
+void extract_B(char *json_string) {
+    cJSON *root = cJSON_Parse(json_string);
+    if (!root) {
+        printf("Error parsing JSON\n");
+        return;
+    }
+
+    // Extracting B
+    cJSON *B_item = cJSON_GetObjectItemCaseSensitive(root, "B");
+    if (cJSON_IsString(B_item) && (B_item->valuestring != NULL)) {
+        printf("B_hex: %s\n", B_item->valuestring);
+        int B_hex_length_local = strlen(B_item->valuestring);
+        B_hex = malloc(B_hex_length_local+1);
+        if(B_hex == NULL){
+            printf("Error after malloc\n");
+            exit(EXIT_FAILURE);
+        }
+        memcpy(B_hex, B_item->valuestring, B_hex_length_local);
+        B_hex[B_hex_length_local] = '\0';
+        B_hex_length = B_hex_length_local;
+    }
+    cJSON_Delete(root);
+}
+
+unsigned char* get_xH_hex(){
+    unsigned char* salt_bytes = malloc(32);
+    int salt_bytes_length = 0;
+    salt_bytes = hexStringToRawString(salt_hex, salt_bytes, &salt_bytes_length);
+
+    unsigned char* salt_and_password_to_hash = malloc(salt_bytes_length+password_length);
+    memcpy(salt_and_password_to_hash, salt_bytes, salt_bytes_length);
+    memcpy(salt_and_password_to_hash+salt_bytes_length,password,password_length);
+    unsigned char xH_bytes[32];
+    SHA256(salt_and_password_to_hash,salt_bytes_length+password_length,xH_bytes);
+    unsigned char* xH_hex = malloc(65);
+    for(int i=0;i<SHA256_DIGEST_LENGTH;i++){
+        sprintf(xH_hex + (i * 2), "%02x", xH_bytes[i]);
+    }
+    return xH_hex;
 }
 
 int main(){
@@ -118,22 +163,11 @@ int main(){
     // Server returns OK
     
 
-    unsigned char* salt_bytes = malloc(32);
-    int salt_bytes_length = 0;
-    salt_bytes = hexStringToRawString(salt_hex, salt_bytes, &salt_bytes_length);
-
-    unsigned char* salt_and_password_to_hash = malloc(salt_bytes_length+password_length);
-    memcpy(salt_and_password_to_hash, salt_bytes, salt_bytes_length);
-    memcpy(salt_and_password_to_hash+salt_bytes_length,password,password_length);
-    unsigned char xH_bytes[32];
-    SHA256(salt_and_password_to_hash,salt_bytes_length+password_length,xH_bytes);
-    unsigned char xH_hex[65];
-    for(int i=0;i<64;i++){
-        sprintf(xH_hex + (i * 2), "%02x", xH_bytes);
-    }
+    unsigned char* xH_hex = get_xH_hex();
     mpz_t x;
     mpz_inits(x, NULL);
     mpz_set_str(x, xH_hex, 16);
+    free(xH_hex);
 
     mpz_powm(v, g, x, N);
     char* v_hex = mpz_get_str(NULL, 16, v);
@@ -164,19 +198,84 @@ int main(){
             return 1;
         }
     } else {
-        printf("curl request failed\n");
+        printf("register() curl request failed\n");
         return 1;
     }
     curl_slist_free_all(headers);
     free(json_body);
     cJSON_Delete(root);
 
+    void (*freefunc)(void *, size_t);
+    mp_get_memory_functions(NULL, NULL, &freefunc);
+    freefunc(v_hex, strlen(v_hex) + 1);
+    // I could add garbate to xH and set x to a different number if I want 
+    // to make the values dissapear for safety reasons
 
 
 
-    // Client auth_first_step()
+
+    // ------------------Client auth_first_step()------------------
     // send I, A
     // Server returns B
+
+    curl_easy_reset(curl_handle);
+
+    // A = g**a % N
+    mpz_t A;
+    mpz_inits(A, NULL);
+
+    mpz_powm(A, g, a, N);
+    char* A_hex_local = mpz_get_str(NULL, 16, A);
+    printf("A_hex: %s\n", A_hex_local);
+    A_hex = malloc(strlen(A_hex_local)+1);
+    A_hex_length = strlen(A_hex_local);
+    memcpy(A_hex, A_hex_local, strlen(A_hex_local));
+    A_hex[A_hex_length] = '\0';
+
+    cJSON *root2 = cJSON_CreateObject();
+    cJSON_AddStringToObject(root2,"I","alice@alicemail.com");
+    cJSON_AddStringToObject(root2,"A",A_hex_local);
+    char* json_body2 = cJSON_Print(root2);
+
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, json_body2);
+
+    struct curl_slist *headers2 = NULL;
+    headers2 = curl_slist_append(headers2, "Content-Type: application/json");
+    headers2 = curl_slist_append(headers2, "Accept: application/json");
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers2);
+
+    curl_easy_setopt(curl_handle, CURLOPT_URL, "localhost:5000/auth_first_step");
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteCallback);
+
+    struct MemoryBlock authfirststep_chunk = {malloc(1), 0};
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&authfirststep_chunk);
+
+    curl_easy_perform(curl_handle);
+    if(res == CURLE_OK){
+        curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE,&response_code);
+        if(response_code == 200){
+            // TODO PROCESS response_body, get B (using authfirststep_chunk)
+            extract_B(authfirststep_chunk.memory);
+            printf("B_hex: %s\n",B_hex);
+            printf("auth_first_step() successful\n");
+        } else {
+            printf("auth_first_step() unsuccessful\n");
+            return 1;
+        }
+    } else {
+        printf("auth_first_step() curl request failed\n");
+        return 1;
+    }
+    curl_slist_free_all(headers2);
+    free(json_body2);
+    cJSON_Delete(root2);
+
+    freefunc(A_hex, strlen(A_hex) + 1);
+
+
+
+
+    
 
     // Compute x, xH, u, uH, S and K
 
