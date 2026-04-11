@@ -8,7 +8,8 @@ app = Flask(__name__)
 
 N = None
 g = None
-v = None
+v_int = None
+v_hex = None
 k = None
 I = None
 A_int = None
@@ -28,18 +29,21 @@ def startup():
     while b == 0:
         b = secrets.randbelow(N)
 
-    print(f'N: {N}\n')
+    print(f'N: {N}')
 
 @app.route('/get_salt', methods=['GET'])
 def get_salt():
-    print(f"salt_hex: {salt_hex}\n")
+    print(f"salt_hex: {salt_hex}")
     return jsonify({"salt": salt_hex}), 201
 
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
-    global v
-    v = int(data.get('v'), 16)
+    global v_int, v_hex
+    v_hex = data.get('v')
+    print(f"v_hex: {v_hex}")
+    v_int = int(v_hex, 16)
+    
     return "OK", 200
 
 
@@ -52,8 +56,9 @@ def authenticate_first_step():
     I = data.get('I')
     A_int = int(data.get('A'), 16)
     A_hex = data.get('A')
+    print(f"A_hex: {A_hex}")
 
-    term1 = (k*v) % N
+    term1 = (k*v_hex) % N
     term2 = pow(g, b, N)
     B_int = (term1 + term2) % N
     B_hex = hex(B_int)[2:]
@@ -69,7 +74,7 @@ def authenticate_last_step():
     uH_hex = uH_bytes.hexdigest()
     u = int(uH_hex, 16)
     
-    term1 = A_int * pow(v, u, N) % N
+    term1 = A_int * pow(v_hex, u, N) % N
     S = pow(term1, b, N)
 
 
